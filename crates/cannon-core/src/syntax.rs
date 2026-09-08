@@ -11,7 +11,7 @@ impl Token {
 }
 
 struct Lexer<'a> { source: &'a str, byte: usize, offset: usize, line: usize, column: usize }
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
     fn span(&self) -> Span { Span { start: self.offset, end: self.offset, line: self.line, column: self.column } }
     fn peek(&self) -> Option<char> { self.source[self.byte..].chars().next() }
     fn bump(&mut self) -> Option<char> {
