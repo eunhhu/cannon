@@ -10,3 +10,4 @@ dist/
 src/generated/build-info.ts
 *.intent-lock
 *.intent-*.tmp
+target/

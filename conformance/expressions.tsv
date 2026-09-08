@@ -1,0 +1,61 @@
+# id	return type	source JSON string	outcome	expected JSON value/code	limits JSON
+precedence	Int	"1 + 2 * 3"	value	7	{}
+parentheses	Int	"(1 + 2) * 3"	value	9	{}
+left-association	Int	"10 - 3 - 2"	value	5	{}
+negative-multiply	Int	"-4 * -3"	value	12	{}
+negative-zero	Int	"-0"	value	0	{}
+leading-zeroes	Int	"0000000000000000000000000000000000012"	value	12	{}
+integer-max	Int	"9007199254740991"	value	9007199254740991	{}
+integer-min	Int	"-9007199254740991"	value	-9007199254740991	{}
+subtract-equal	Int	"9007199254740991 - 9007199254740991"	value	0	{}
+stock-available	Bool	"8 + 2 <= 10"	value	true	{}
+stock-reserve-one	Bool	"8 + 2 < 10"	value	false	{}
+greater	Bool	"11 > 10"	value	true	{}
+greater-equal	Bool	"10 >= 10"	value	true	{}
+not-equal	Bool	"1 != 2"	value	true	{}
+not-keyword	Bool	"not false"	value	true	{}
+not-symbol	Bool	"!true"	value	false	{}
+logic-precedence	Bool	"true or false and false"	value	true	{}
+logic-aliases	Bool	"false || true && true"	value	true	{}
+short-and	Bool	"false and (9007199254740991 + 1 == 0)"	value	false	{}
+short-or	Bool	"true or (9007199254740991 + 1 == 0)"	value	true	{}
+true-branch	Int	"if true then 7 else 9007199254740991 + 1"	value	7	{}
+false-branch	Int	"if false then 9007199254740991 + 1 else 9"	value	9	{}
+nested-if	Int	"if true then if false then 1 else 2 else 3"	value	2	{}
+parenthesized-branch	Int	"if true then (3 + 4) else (8 + 9)"	value	7	{}
+parenthesized-unary	Int	"-(2 + 3)"	value	-5	{}
+empty-string	String	"\"\""	value	""	{}
+korean-string	String	"\"\uc0ac\ub78c\uc774 \uacb0\uc815\ud55c\ub2e4\""	value	"\uc0ac\ub78c\uc774 \uacb0\uc815\ud55c\ub2e4"	{}
+emoji-string	String	"\"\ud83d\ude80\""	value	"\ud83d\ude80"	{}
+unicode-escape	Bool	"\"\\ud83d\\ude80\" == \"\ud83d\ude80\""	value	true	{}
+lone-surrogate	String	"\"\\ud800\""	value	"\ud800"	{}
+surrogate-inequality	Bool	"\"\\ud800\" != \"\\udfff\""	value	true	{}
+json-escapes	String	"\"\\b\\f\\n\\r\\t\\/\\\\\\\"\""	value	"\b\f\n\r\t/\\\""	{}
+string-equality	Bool	"\"\uc758\ub3c4\" == \"\uc758\ub3c4\""	value	true	{}
+empty-vs-space	Bool	"\"\" == \" \""	value	false	{}
+no-normalization	Bool	"\"\u00e9\" == \"e\u0301\""	value	false	{}
+raw-line-separator	String	"\"a\u2028b\""	value	"a\u2028b"	{}
+unicode-comment-crlf	Int	"// \ud83d\ude80\r\n  1 + 2"	value	3	{}
+mixed-line-endings	Int	"1 +\r\n 2 *\n3"	value	7	{}
+trailing-comment	Int	"1 + 2 // evaluated\n"	value	3	{}
+js-whitespace	Int	"\ufeff1\u00a0+\u20072"	value	3	{}
+trace-emoji-span	Bool	"\"\ud83d\ude80\" == \"\ud83d\ude80\""	value	true	{}
+add-overflow	Int	"9007199254740991 + 1"	runtime-error	"INTEGER_RANGE"	{}
+subtract-overflow	Int	"-9007199254740991 - 1"	runtime-error	"INTEGER_RANGE"	{}
+multiply-overflow	Int	"9007199254740991 * 9007199254740991"	runtime-error	"INTEGER_RANGE"	{}
+literal-range	Int	"9007199254740992"	compile-error	"PARSE_ERROR"	{}
+huge-literal	Int	"999999999999999999999999999999"	compile-error	"PARSE_ERROR"	{}
+checked-unused-branch	Int	"if true then 1 else false"	compile-error	"TYPE_MISMATCH"	{}
+checked-unused-operand	Bool	"false and 3"	compile-error	"TYPE_MISMATCH"	{}
+no-coercion	Bool	"1 == true"	compile-error	"TYPE_MISMATCH"	{}
+no-string-concat	String	"\"1\" + \"2\""	compile-error	"TYPE_MISMATCH"	{}
+boolean-condition	Int	"if 1 then 2 else 3"	compile-error	"TYPE_MISMATCH"	{}
+numeric-not	Bool	"not 1"	compile-error	"TYPE_MISMATCH"	{}
+invalid-escape	String	"\"\\q\""	compile-error	"PARSE_ERROR"	{}
+invalid-unicode-escape	String	"\"\\u12xz\""	compile-error	"PARSE_ERROR"	{}
+no-division	Int	"4 / 2"	compile-error	"PARSE_ERROR"	{}
+non-js-whitespace	Int	"1\u0085+2"	compile-error	"PARSE_ERROR"	{}
+missing-parenthesis	Int	"(1 + 2"	compile-error	"PARSE_ERROR"	{}
+step-limit	Int	"1 + 2"	runtime-error	"STEP_LIMIT"	{"maxSteps":1}
+depth-limit	Int	"1 + 2"	runtime-error	"DEPTH_LIMIT"	{"maxDepth":1}
+trace-limit	Int	"1 + 2"	runtime-error	"TRACE_LIMIT"	{"maxTrace":1}

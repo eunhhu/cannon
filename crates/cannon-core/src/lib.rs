@@ -1,0 +1,52 @@
+//! Experimental native expression slice, not a replacement for the full Cannon engine.
+//! No filesystem, database, editor, or AI dependency belongs in this library.
+mod execution;
+mod syntax;
+pub mod report;
+
+pub use execution::{evaluate, Limits, Outcome, TraceStep};
+pub use syntax::{compile_expression, CompiledExpression};
+
+pub const MAX_INT: i64 = 9_007_199_254_740_991;
+pub const MAX_SOURCE_UNITS: usize = 262_144;
+pub const MAX_TOKENS: usize = 20_000;
+pub const MAX_DEPTH: usize = 128;
+
+/// UTF-16 offsets, end-exclusive, and one-based line/column, relative to exact input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
+}
+impl Diagnostic {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>, span: Span) -> Self {
+        Self { code, message: message.into(), span }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Type { Int, Bool, String }
+impl Type {
+    pub fn name(self) -> &'static str {
+        match self { Self::Int => "Int", Self::Bool => "Bool", Self::String => "String" }
+    }
+}
+
+/// UTF-16 code units deliberately preserve JSON's unpaired surrogate escapes.
+/// Rust String would silently narrow the reference engine's String domain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Value { Int(i64), Bool(bool), Text(Vec<u16>) }
+impl Value {
+    pub fn value_type(&self) -> Type {
+        match self { Self::Int(_) => Type::Int, Self::Bool(_) => Type::Bool, Self::Text(_) => Type::String }
+    }
+}

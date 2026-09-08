@@ -1,0 +1,35 @@
+name: Verify Cannon native slice
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.85.1 --profile minimal --component clippy --component rustfmt
+      - name: Native tests without registry dependencies
+        run: cargo test --workspace --locked --offline
+      - name: Native lint
+        run: cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+      - name: Build native CLI
+        run: cargo build --workspace --locked --offline
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Cross-engine values, failures, traces and source positions
+        run: node scripts/check-native-conformance.mjs
+      - name: Native demo
+        run: cargo run --locked --offline --bin cannon-native -- demo
+      - name: Existing full-engine demo
+        run: node dist/src/cli.js demo
