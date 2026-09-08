@@ -4,7 +4,7 @@ mod execution;
 mod syntax;
 pub mod report;
 
-pub use execution::{evaluate, Limits, Outcome, TraceStep};
+pub use execution::{evaluate, evaluate_observed, CancellationToken, Limits, ObservationOptions, ObservedOutcome, Outcome, TraceStep};
 pub use syntax::{compile_expression, CompiledExpression};
 
 pub const MAX_INT: i64 = 9_007_199_254_740_991;

@@ -1,5 +1,7 @@
 use crate::syntax::{NodeKind, Op};
 use crate::{CompiledExpression, Diagnostic, Span, Value, MAX_DEPTH, MAX_INT};
+use std::ops::ControlFlow;
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits { pub max_steps: usize, pub max_depth: usize, pub max_trace: usize }
@@ -10,11 +12,75 @@ impl Default for Limits {
 pub struct TraceStep { pub kind: &'static str, pub label: &'static str, pub span: Span, pub value: Option<Value> }
 #[derive(Clone, Debug)]
 pub struct Outcome { pub result: Result<Value, Diagnostic>, pub trace: Vec<TraceStep>, pub steps: usize }
-struct Executor<'a> { program: &'a CompiledExpression, limits: Limits, trace: Vec<TraceStep>, steps: usize }
-impl Executor<'_> {
+
+/// A one-way cooperative cancellation signal shared with an editor/host thread.
+/// Cancellation is not a deadline, thread termination, or retroactive invalidation.
+#[derive(Clone, Debug, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+impl CancellationToken {
+    pub fn new() -> Self { Self::default() }
+    pub fn cancel(&self) { self.0.store(true, Ordering::Relaxed); }
+    pub fn is_cancelled(&self) -> bool { self.0.load(Ordering::Relaxed) }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ObservationOptions {
+    /// False delivers events to the observer without retaining their values.
+    pub retain_trace: bool,
+    /// Sum of UTF-16 units in text values delivered as trace events, including
+    /// repeated observations. Not a bound on total memory or encoded JSON bytes.
+    pub max_trace_text_units: usize,
+}
+impl Default for ObservationOptions {
+    fn default() -> Self { Self { retain_trace: true, max_trace_text_units: usize::MAX } }
+}
+
+/// Streaming metadata stays separate from the legacy Outcome: an empty retained
+/// trace must not be mistaken for proof that no operations were observed.
+#[derive(Clone, Debug)]
+pub struct ObservedOutcome {
+    pub outcome: Outcome,
+    pub options: ObservationOptions,
+    pub emitted_events: usize,
+    pub observed_text_units: usize,
+}
+
+struct Executor<'a, F> {
+    program: &'a CompiledExpression,
+    limits: Limits,
+    options: ObservationOptions,
+    cancellation: &'a CancellationToken,
+    observer: F,
+    trace: Vec<TraceStep>,
+    steps: usize,
+    emitted_events: usize,
+    observed_text_units: usize,
+}
+impl<F: FnMut(&TraceStep) -> ControlFlow<()>> Executor<'_, F> {
+    fn checkpoint(&self, span: Span) -> Result<(), Diagnostic> {
+        if self.cancellation.is_cancelled() {
+            Err(Diagnostic::new("CANCELLED", "Execution cancelled; no completed result is available.", span))
+        } else { Ok(()) }
+    }
     fn note(&mut self, kind: &'static str, label: &'static str, span: Span, value: Option<Value>) -> Result<(), Diagnostic> {
-        if self.trace.len() >= self.limits.max_trace { return Err(Diagnostic::new("TRACE_LIMIT", "Trace budget exceeded; this run is incomplete.", span)); }
-        self.trace.push(TraceStep { kind, label, span, value }); Ok(())
+        self.checkpoint(span)?;
+        // Count emitted events, not retained events: streaming cannot bypass limits.
+        if self.emitted_events >= self.limits.max_trace {
+            return Err(Diagnostic::new("TRACE_LIMIT", "Trace budget exceeded; this run is incomplete.", span));
+        }
+        let units = match &value { Some(Value::Text(text)) => text.len(), _ => 0 };
+        let total = self.observed_text_units.checked_add(units)
+            .filter(|n| *n <= self.options.max_trace_text_units)
+            .ok_or_else(|| Diagnostic::new("TRACE_VALUE_LIMIT", "Observed text budget exceeded; this run is incomplete.", span))?;
+        let step = TraceStep { kind, label, span, value };
+        self.observed_text_units = total;
+        self.emitted_events += 1;
+        let decision = (self.observer)(&step);
+        if self.options.retain_trace { self.trace.push(step); }
+        if decision.is_break() {
+            return Err(Diagnostic::new("CANCELLED", "Observer cancelled execution; no completed result is available.", span));
+        }
+        self.checkpoint(span)
     }
     fn integer(value: Value, span: Span) -> Result<i64, Diagnostic> {
         match value { Value::Int(n) => Ok(n), _ => Err(Diagnostic::new("TYPE_ERROR", "Expected Int.", span)) }
@@ -29,10 +95,10 @@ impl Executor<'_> {
     fn eval(&mut self, id: usize, depth: usize) -> Result<Value, Diagnostic> {
         let node = &self.program.nodes[id];
         let span = node.span;
+        self.checkpoint(span)?;
         self.steps += 1;
         if self.steps > self.limits.max_steps { return Err(Diagnostic::new("STEP_LIMIT", "Execution step budget exceeded.", span)); }
         if depth > self.limits.max_depth { return Err(Diagnostic::new("DEPTH_LIMIT", "Execution depth budget exceeded.", span)); }
-        // Clone one flat arena node, not the whole subtree.
         let kind = node.kind.clone();
         let (value, trace_kind, label) = match kind {
             NodeKind::Literal(value) => (value, "literal", "literal"),
@@ -80,11 +146,33 @@ impl Executor<'_> {
     }
 }
 
-pub fn evaluate(program: &CompiledExpression, limits: Limits) -> Outcome {
+/// Evaluate through the same interpreter used by `evaluate`, observing events as
+/// they occur. The callback is synchronous and trusted host code. It may cancel,
+/// but the engine cannot impose deadlines or catch panics inside host callbacks.
+pub fn evaluate_observed<F: FnMut(&TraceStep) -> ControlFlow<()>>(
+    program: &CompiledExpression,
+    limits: Limits,
+    options: ObservationOptions,
+    cancellation: &CancellationToken,
+    observer: F,
+) -> ObservedOutcome {
     if limits.max_steps == 0 || limits.max_steps > 1_000_000 || limits.max_depth == 0 || limits.max_depth > MAX_DEPTH || limits.max_trace == 0 || limits.max_trace > 1_000_000 {
-        return Outcome { result: Err(Diagnostic::new("INVALID_LIMIT", "Limits must be positive; depth <= 128, steps/trace <= 1000000.", program.span())), trace: Vec::new(), steps: 0 };
+        return ObservedOutcome {
+            outcome: Outcome { result: Err(Diagnostic::new("INVALID_LIMIT", "Limits must be positive; depth <= 128, steps/trace <= 1000000.", program.span())), trace: Vec::new(), steps: 0 },
+            options, emitted_events: 0, observed_text_units: 0,
+        };
     }
-    let mut executor = Executor { program, limits, trace: Vec::new(), steps: 0 };
+    let mut executor = Executor {
+        program, limits, options, cancellation, observer,
+        trace: Vec::new(), steps: 0, emitted_events: 0, observed_text_units: 0,
+    };
     let result = executor.eval(program.root, 1);
-    Outcome { result, trace: executor.trace, steps: executor.steps }
+    ObservedOutcome {
+        outcome: Outcome { result, trace: executor.trace, steps: executor.steps },
+        options, emitted_events: executor.emitted_events, observed_text_units: executor.observed_text_units,
+    }
+}
+
+pub fn evaluate(program: &CompiledExpression, limits: Limits) -> Outcome {
+    evaluate_observed(program, limits, ObservationOptions::default(), &CancellationToken::new(), |_| ControlFlow::Continue(())).outcome
 }

@@ -6,6 +6,7 @@ permissions:
   contents: read
 jobs:
   native:
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +24,8 @@ jobs:
         run: cargo test --workspace --locked --offline
       - name: Native lint
         run: cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+      - name: Optimized native tests
+        run: cargo test --workspace --release --locked --offline
       - name: Build native CLI
         run: cargo build --workspace --locked --offline
       - run: npm ci --ignore-scripts
@@ -31,5 +34,7 @@ jobs:
         run: node scripts/check-native-conformance.mjs
       - name: Native demo
         run: cargo run --locked --offline --bin cannon-native -- demo
+      - name: Streaming observation and cancellation demo
+        run: cargo run --locked --offline -p cannon-core --example observe
       - name: Existing full-engine demo
         run: node dist/src/cli.js demo
