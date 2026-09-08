@@ -1,0 +1,35 @@
+{
+  "name": "cannon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human-owned executable intent, inspectable evidence, and reviewable AI proposals.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "bin": {
+    "cannon": "./dist/src/cli.js",
+    "intent": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run build",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "demo": "npm run build && node dist/src/cli.js demo",
+    "intent": "node dist/src/cli.js",
+    "cannon": "node dist/src/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.33",
+    "typescript": "5.8.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eunhhu/cannon.git"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "project": "cannon",
+  "version": "0.1.0",
+  "environment": {
+    "node": "v22.16.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "typescript": "5.8.3",
+    "nodeTypeDefinitions": "22.19.7 (preinstalled; lockfile specifies 22.15.33)",
+    "undiciTypes": "6.21.0"
+  },
+  "engineDigest": "2bd9123433d0603a3bf3af1bcd3c7dc9f6f48db38de678482716d3d59bf5c7f3",
+  "checks": {
+    "cleanLockedInstall": "not-completed: registry DNS unavailable; verify separately in remote CI",
+    "typeScriptBuild": "passed using documented preinstalled dependencies",
+    "tests": {
+      "total": 90,
+      "passed": 90,
+      "failed": 0,
+      "skipped": 0
+    },
+    "boundedInventoryInputs": 3060,
+    "cliDemo": "passed",
+    "editorRenderingUnitTests": "not included in this remote delivery",
+    "editorAdapterSyntax": "not included in this remote delivery",
+    "realVSCodeExtensionHost": "not-run",
+    "remoteGitHubActions": "see repository Actions for independent locked-install results",
+    "actualAIProviderIntegration": "not-implemented",
+    "persistentDatabaseIntegration": "not-implemented"
+  },
+  "testLogSha256": "d79a72711f4472942bba8264870470064e62d80f2a4339a5675c07decec46783",
+  "note": "Captured local checks, not a signed attestation. Do not conflate local dependency overrides with a clean lockfile install or remote CI.",
+  "delivery": "CLI and semantic engine; editor upload blocked"
+}

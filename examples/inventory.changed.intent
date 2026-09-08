@@ -1,0 +1,43 @@
+// Human-owned model and policy. This file is the executable source of truth.
+module Inventory
+
+@id("stock")
+record Stock {
+    @id("stock.onHand") onHand: NonNegativeInt
+    @id("stock.reserved") reserved: NonNegativeInt
+    invariant reserved <= onHand
+}
+
+@id("canReserve")
+rule canReserve(stock: Stock, quantity: PositiveInt) -> Bool =
+    stock.reserved + quantity < stock.onHand
+
+@id("reserve")
+transition reserve(stock: Stock, quantity: PositiveInt) -> Stock {
+    require canReserve(stock, quantity) else "INSUFFICIENT_STOCK"
+    next Stock {
+        onHand: stock.onHand,
+        reserved: stock.reserved + quantity
+    }
+}
+
+@id("case.exact")
+scenario "재고를 하나 이상 남겨야 한다" {
+    expect canReserve(Stock { onHand: 10, reserved: 8 }, 2) == false
+}
+
+@id("case.excess")
+scenario "남은 재고보다 많이 예약할 수 없다" {
+    expect canReserve(Stock { onHand: 10, reserved: 8 }, 3) == false
+}
+
+@id("case.partial")
+scenario "예약하면 예약 수량만 증가한다" {
+    expect reserve(Stock { onHand: 10, reserved: 2 }, 3) ==
+        Stock { onHand: 10, reserved: 5 }
+}
+
+@id("case.empty")
+scenario "재고가 없으면 예약할 수 없다" {
+    expect canReserve(Stock { onHand: 0, reserved: 0 }, 1) == false
+}

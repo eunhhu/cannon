@@ -1,0 +1,12 @@
+node_modules
+dist/
+.intent/
+*.log
+.env
+.env.*
+!.env.example
+*.vsix
+.DS_Store
+src/generated/build-info.ts
+*.intent-lock
+*.intent-*.tmp
