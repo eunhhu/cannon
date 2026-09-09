@@ -6,7 +6,7 @@ A developer edits the domain model and policy directly. AI can propose or critiq
 
 The first vertical slice is inventory reservation. This is not an inventory-specific hard-coded evaluator: the same expression engine supports other bounded pure models and policies. The language is nevertheless intentionally small and not yet a general-purpose programming system.
 
-## Data flow and ownership
+## Data flow and ownership of the TypeScript reference
 
 `source text → parser → binding/type checks → frozen Compilation → execution / comparison / inspection → CLI or another adapter`
 
@@ -18,7 +18,7 @@ The first vertical slice is inventory reservation. This is not an inventory-spec
 
 `src/filesystem.ts` handles source I/O and cooperative single-file application outside the semantic engine. `src/adapters/memory-store.ts` is a deliberately separate illustrative compare-and-set store. It does not persist data or automatically validate an arbitrary record's business constraints.
 
-`src/cli.ts` is the shipped consumer. Editor and AI integrations should consume the same public API in `src/index.ts`. The editor source is not included in this remote delivery; see `delivery.md`.
+`src/cli.ts` is the shipped reference consumer. Editor and AI integrations should consume the same public API in `src/index.ts`. The editor source is not included in this remote delivery; see `delivery.md`.
 
 ## Identity and provenance
 
@@ -40,4 +40,14 @@ It would create synchronization work between a design model, implementation, and
 
 ## Scalability limits
 
-The current checker and dependency analysis favor clarity over large-project indexing. One file is capped in size and nesting, and execution is budgeted. Multi-file incremental compilation, selective evidence invalidation, and IDE worker isolation are subsequent work. Do not infer large-codebase performance from this prototype.
+The reference checker and dependency analysis favor clarity over large-project indexing. One file is capped in size and nesting, and execution is budgeted. Multi-file incremental compilation, selective evidence invalidation, and IDE worker isolation are subsequent work. Do not infer large-codebase performance from this prototype.
+
+## Native policies, sessions and project orchestration
+
+`crates/cannon-core` is an additive native path. Its existing scalar compiler and evaluator own numeric/string semantics, typed input binding, actual trace events and cooperative cancellation. The full `.intent` reference grammar has not been ported here.
+
+`session` owns immutable single-policy source/schema/input/expectation snapshots and exact in-memory review application. `project` owns a bounded, host-declared DAG of modules, raw-input owners, policy sources and typed port links. It checks imports, exports, ownership and cycles before calling that same scalar compiler/evaluator. `project_review` compares architecture facts and replays independent original multi-output cases on the candidate graph. None is a second parser/evaluator or a filesystem loader.
+
+Module visibility constrains graph connections only; it is not confidentiality or an OS/database access boundary. Execution is explicitly eager per policy, while expression-level short-circuiting remains unchanged. Per-policy receipts retain their own inputs and their source in the exact compiled project. A failed project never returns partial values as a successful project result.
+
+Project reports are in-memory scoped evidence, not the reference engine's hashed evidence format. Compiled-object identity is not a durable build identity, and projects do not yet have cross-file atomic application, live-file freshness or persistent approval. The contracts in `docs/native-projects.md`, `docs/native-sessions.md` and `docs/native-bound-policies.md` distinguish these boundaries. The default npm command and TypeScript acceptance criteria remain unchanged.
