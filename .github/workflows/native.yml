@@ -40,5 +40,7 @@ jobs:
         run: cargo run --locked --offline -p cannon-core --example observe
       - name: Typed policy and preserved-expectation demo
         run: cargo run --locked --offline --bin cannon-policy -- demo
+      - name: Version-scoped policy session and reviewed application demo
+        run: cargo run --locked --offline -p cannon-core --example session_review
       - name: Existing full-engine demo
         run: node dist/src/cli.js demo

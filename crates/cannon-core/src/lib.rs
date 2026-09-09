@@ -4,6 +4,7 @@ mod execution;
 mod syntax;
 mod inputs;
 pub mod policy_review;
+pub mod session;
 pub mod report;
 pub mod bound_report;
 

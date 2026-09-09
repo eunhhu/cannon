@@ -49,7 +49,7 @@ impl PolicyReview {
             .filter(|(old, new)| old.passed && !new.passed).map(|(_, new)| new.case.id.as_str()).collect()
     }
 }
-fn validate_cases(cases: &[PolicyCase]) -> Result<(), Diagnostic> {
+pub(crate) fn validate_cases(cases: &[PolicyCase]) -> Result<(), Diagnostic> {
     let error = |m| Diagnostic::new("CASE_SCHEMA", m, boundary_span());
     if cases.len() > MAX_REVIEW_CASES { return Err(error("At most 128 cases are supported.")); }
     let mut ids = BTreeSet::new();
@@ -73,16 +73,18 @@ fn validate_cases(cases: &[PolicyCase]) -> Result<(), Diagnostic> {
     }
     Ok(())
 }
-struct Budget { limits: ReviewLimits, events: usize, text: usize }
-impl Budget {
+struct Budget<'a> { limits: ReviewLimits, events: usize, text: usize, cancellation: &'a CancellationToken }
+impl Budget<'_> {
     fn run(&mut self, program: &CompiledExpression, cases: &[PolicyCase]) -> Result<Vec<CaseResult>, Diagnostic> {
         let mut results = Vec::new();
         for case in cases {
+            check_cancellation(self.cancellation)?;
             let mut exhausted = false;
             let limits = self.limits;
+            let cancellation = self.cancellation;
             let observed = evaluate_bound_observed(program, &case.inputs, limits.execution,
                 ObservationOptions { retain_trace: true, max_trace_text_units: limits.max_text_units },
-                &CancellationToken::new(), |event| {
+                cancellation, |event| {
                     let units = match &event.value { Some(Value::Text(s)) => s.len(), _ => 0 };
                     match (self.events.checked_add(1), self.text.checked_add(units)) {
                         (Some(count), Some(text)) if count <= limits.max_events && text <= limits.max_text_units => {
@@ -92,6 +94,7 @@ impl Budget {
                     }
                 });
             if exhausted || matches!(&observed.outcome.result, Err(e) if e.code == "TRACE_VALUE_LIMIT") { return Err(Diagnostic::new("REVIEW_LIMIT", "Cumulative review trace budget exhausted; no complete review.", boundary_span())); }
+            check_cancellation(self.cancellation)?;
             let outcome = observed.outcome;
             let passed = matches!(&outcome.result, Ok(value) if value == &case.expected);
             results.push(CaseResult { case: case.clone(), outcome, passed });
@@ -102,6 +105,20 @@ impl Budget {
 
 pub fn review_policies(baseline: &CompiledExpression, candidate: &CompiledExpression,
     old_cases: &[PolicyCase], new_cases: &[PolicyCase], limits: ReviewLimits) -> Result<PolicyReview, Diagnostic> {
+    review_policies_cancellable(baseline, candidate, old_cases, new_cases, limits, &CancellationToken::new())
+}
+
+fn check_cancellation(token: &CancellationToken) -> Result<(), Diagnostic> {
+    if token.is_cancelled() {
+        Err(Diagnostic::new("CANCELLED", "Policy review cancelled; no complete review is available.", boundary_span()))
+    } else { Ok(()) }
+}
+
+/// Same review engine, with cooperative cancellation at execution checkpoints and
+/// suite boundaries. Partial or cancelled reviews are never approval evidence.
+pub fn review_policies_cancellable(baseline: &CompiledExpression, candidate: &CompiledExpression,
+    old_cases: &[PolicyCase], new_cases: &[PolicyCase], limits: ReviewLimits,
+    cancellation: &CancellationToken) -> Result<PolicyReview, Diagnostic> {
     validate_cases(old_cases)?; validate_cases(new_cases)?;
     let e = limits.execution;
     if e.max_steps == 0 || e.max_steps > 1_000_000 || e.max_depth == 0 || e.max_depth > crate::MAX_DEPTH
@@ -109,6 +126,7 @@ pub fn review_policies(baseline: &CompiledExpression, candidate: &CompiledExpres
         || limits.max_text_units > 16_777_216 {
         return Err(Diagnostic::new("INVALID_LIMIT", "Invalid review or execution limits.", boundary_span()));
     }
+    check_cancellation(cancellation)?;
     let before: BTreeMap<_, _> = baseline.inputs().iter().map(|s| (s.id.as_str(), s)).collect();
     let after: BTreeMap<_, _> = candidate.inputs().iter().map(|s| (s.id.as_str(), s)).collect();
     let mut input_changes = Vec::new();
@@ -136,11 +154,12 @@ pub fn review_policies(baseline: &CompiledExpression, candidate: &CompiledExpres
             (None, Some(_)) => add("added"), (Some(_), None) => add("removed"), _ => {}
         }
     }
-    let mut budget = Budget { limits, events: 0, text: 0 };
+    let mut budget = Budget { limits, events: 0, text: 0, cancellation };
     let baseline_results = budget.run(baseline, old_cases)?;
     let candidate_results = budget.run(candidate, new_cases)?;
     // Never derive historical inputs or expectations from the candidate's suite.
     let historical_results = budget.run(candidate, old_cases)?;
+    check_cancellation(cancellation)?;
     Ok(PolicyReview { baseline: PolicySnapshot::of(baseline), candidate: PolicySnapshot::of(candidate),
         logic_changed: !baseline.same_logic(candidate), input_changes, case_changes,
         baseline_results, candidate_results, historical_results, limits })
