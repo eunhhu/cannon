@@ -92,7 +92,7 @@ fn cumulative_text_budget_is_not_reset_between_suites() {
     let a=compile_with_inputs("s",&[InputSpec::new("s","s",InputType::String)]).unwrap();
     let c=PolicyCase{id:"s".into(),name:"Text".into(),inputs:InputBindings::from([("s".into(),Value::Text(vec![65]))]),expected:Value::Text(vec![65])};
     let limits=ReviewLimits{max_text_units:2,..ReviewLimits::default()};
-    assert_eq!(review_policies(&a,&a,&[c.clone()],&[c],limits).unwrap_err().code,"REVIEW_LIMIT");
+    assert_eq!(review_policies(&a,&a,std::slice::from_ref(&c),std::slice::from_ref(&c),limits).unwrap_err().code,"REVIEW_LIMIT");
 }
 #[test]
 fn execution_errors_never_match_a_value_expectation() {

@@ -115,7 +115,10 @@ pub fn review_policies(baseline: &CompiledExpression, candidate: &CompiledExpres
     for id in before.keys().chain(after.keys()).copied().collect::<BTreeSet<_>>() {
         let mut add = |kind| input_changes.push(Change { id: id.to_owned(), kind });
         match (before.get(id), after.get(id)) {
-            (Some(a), Some(b)) => { if a.name != b.name { add("renamed"); } if a.input_type != b.input_type { add("type-changed"); } }
+            (Some(a), Some(b)) => {
+                if a.name != b.name { add("renamed"); }
+                if a.input_type != b.input_type { add("type-changed"); }
+            }
             (None, Some(_)) => add("added"), (Some(_), None) => add("removed"), _ => {}
         }
     }
