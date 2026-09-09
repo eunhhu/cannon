@@ -7,6 +7,8 @@ pub mod policy_review;
 pub mod report;
 pub mod bound_report;
 pub mod session;
+pub mod project;
+pub mod project_review;
 
 pub use execution::{evaluate, evaluate_bound, evaluate_bound_observed, evaluate_observed, CancellationToken, Limits, ObservationOptions, ObservedOutcome, Outcome, TraceStep};
 pub use syntax::{compile_expression, compile_with_inputs, parse_input_literal, CompiledExpression};
