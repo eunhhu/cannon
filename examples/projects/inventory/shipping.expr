@@ -1,0 +1,2 @@
+// Checkout sees the decision, not raw stock data.
+if allowed then 0 else 3000

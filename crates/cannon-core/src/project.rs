@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::inputs::{check_schema, resolve, valid_id};
 use crate::{compile_with_inputs, evaluate_bound_observed, CancellationToken, CompiledExpression,
     Diagnostic, InputBindings, InputSpec, Limits, ObservationOptions, ObservedOutcome,
-    TraceStep, Value, MAX_DEPTH, MAX_INPUTS, MAX_SOURCE_UNITS};
+    TraceStep, MAX_DEPTH, MAX_INPUTS, MAX_SOURCE_UNITS};
 
 pub const MAX_MODULES: usize = 64;
 pub const MAX_POLICIES: usize = 128;
@@ -50,15 +50,16 @@ pub struct ProjectError {
     /// A declaration ID, never a fabricated source offset.
     pub subject: Option<String>,
     pub message: String,
+    /// Box the optional detailed diagnostic, keeping ordinary Result values small.
     /// Present only when the existing compiler/evaluator supplied this diagnostic.
-    pub diagnostic: Option<Diagnostic>,
+    pub diagnostic: Option<Box<Diagnostic>>,
 }
 impl ProjectError {
     pub(crate) fn new(code: &'static str, subject: Option<&str>, message: impl Into<String>) -> Self {
         Self { code, subject: subject.map(str::to_owned), message: message.into(), diagnostic: None }
     }
     fn engine(code: &'static str, subject: Option<&str>, diagnostic: Diagnostic) -> Self {
-        Self { code, subject: subject.map(str::to_owned), message: diagnostic.message.clone(), diagnostic: Some(diagnostic) }
+        Self { code, subject: subject.map(str::to_owned), message: diagnostic.message.clone(), diagnostic: Some(Box::new(diagnostic)) }
     }
 }
 impl fmt::Display for ProjectError {
@@ -153,6 +154,11 @@ pub fn compile_project(input: &ProjectSpec) -> Result<Arc<CompiledProject>, Proj
             || !modules.contains_key(&policy.module) || policy.links.len() > MAX_INPUTS
             || policy_map.insert(policy.id.clone(), policy).is_some() {
             return Err(schema(Some(&policy.id), "Invalid/duplicate policy metadata, owner or link count."));
+        }
+        if policy.links.values().any(|link| match link {
+            InputSource::External(id) | InputSource::Policy(id) => !valid_id(id),
+        }) {
+            return Err(schema(Some(&policy.id), "Invalid provider identity in a port connection."));
         }
         let size = policy.source.encode_utf16().take(MAX_SOURCE_UNITS + 1).count();
         if size > MAX_SOURCE_UNITS {
@@ -257,6 +263,7 @@ impl PolicyRun {
 pub struct ProjectRun {
     project: Arc<CompiledProject>,
     inputs: InputBindings,
+    inputs_retained: bool,
     limits: ProjectLimits,
     nodes: Vec<PolicyRun>,
     result: Result<InputBindings, ProjectError>,
@@ -266,7 +273,12 @@ pub struct ProjectRun {
 }
 impl ProjectRun {
     pub fn project(&self) -> &Arc<CompiledProject> { &self.project }
+    /// Accepted input values only. On preflight failure this is empty; inspect
+    /// accepted_inputs() to distinguish omitted payload from valid zero inputs.
     pub fn inputs(&self) -> &InputBindings { &self.inputs }
+    pub fn accepted_inputs(&self) -> Option<&InputBindings> {
+        self.inputs_retained.then_some(&self.inputs)
+    }
     pub fn limits(&self) -> ProjectLimits { self.limits }
     pub fn nodes(&self) -> &[PolicyRun] { &self.nodes }
     pub fn result(&self) -> &Result<InputBindings, ProjectError> { &self.result }
@@ -279,10 +291,7 @@ impl ProjectRun {
 fn execute_inner<F: FnMut(&str, &TraceStep) -> ControlFlow<()>>(
     run: &mut ProjectRun, token: &CancellationToken, mut observer: F,
 ) -> Result<InputBindings, ProjectError> {
-    run.limits.validate()?;
     let project = run.project.clone();
-    resolve(&project.external_validator, &run.inputs)
-        .map_err(|d| ProjectError::engine("PROJECT_INPUT", None, d))?;
     let mut values = InputBindings::new();
     for id in &project.order {
         if token.is_cancelled() {
@@ -336,10 +345,11 @@ pub fn execute_project_observed<F: FnMut(&str, &TraceStep) -> ControlFlow<()>>(
     // Do not clone unbounded external payloads into a long-lived receipt.
     let preflight = limits.validate().and_then(|_| resolve(&project.external_validator, inputs)
         .map(|_| ()).map_err(|d| ProjectError::engine("PROJECT_INPUT", None, d)));
-    let mut run = ProjectRun { project: project.clone(), inputs: InputBindings::new(), limits,
+    let mut run = ProjectRun { project: project.clone(), inputs: InputBindings::new(), inputs_retained: false, limits,
         nodes: Vec::new(), result: Ok(InputBindings::new()), steps: 0, events: 0, text_units: 0 };
     if let Err(error) = preflight { run.result = Err(error); return run; }
     run.inputs = inputs.clone();
+    run.inputs_retained = true;
     run.result = execute_inner(&mut run, cancellation, observer);
     run
 }

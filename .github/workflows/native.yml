@@ -42,5 +42,7 @@ jobs:
         run: cargo run --locked --offline --bin cannon-policy -- demo
       - name: Versioned session and exact-review application demo
         run: cargo run --locked --offline -p cannon-core --example review
+      - name: Module boundaries and multi-policy historical review demo
+        run: cargo run --locked --offline -p cannon-core --example project
       - name: Existing full-engine demo
         run: node dist/src/cli.js demo
