@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "Cannon's experimental native pure-expression core"
+description = "Cannon's native typed scalar-policy core"
 
 [lints]
 workspace = true
@@ -12,3 +12,7 @@ workspace = true
 [[bin]]
 name = "cannon-native"
 path = "src/bin/cannon-native.rs"
+
+[[bin]]
+name = "cannon-policy"
+path = "src/bin/cannon-policy.rs"

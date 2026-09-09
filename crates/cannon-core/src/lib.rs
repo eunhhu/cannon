@@ -1,11 +1,15 @@
-//! Experimental native expression slice, not a replacement for the full Cannon engine.
+//! Native scalar policies: one typed expression engine for execution and inspection.
 //! No filesystem, database, editor, or AI dependency belongs in this library.
 mod execution;
 mod syntax;
+mod inputs;
+pub mod policy_review;
 pub mod report;
+pub mod bound_report;
 
-pub use execution::{evaluate, evaluate_observed, CancellationToken, Limits, ObservationOptions, ObservedOutcome, Outcome, TraceStep};
-pub use syntax::{compile_expression, CompiledExpression};
+pub use execution::{evaluate, evaluate_bound, evaluate_bound_observed, evaluate_observed, CancellationToken, Limits, ObservationOptions, ObservedOutcome, Outcome, TraceStep};
+pub use syntax::{compile_expression, compile_with_inputs, parse_input_literal, CompiledExpression};
+pub use inputs::{InputBindings, InputReference, InputSpec, InputType, MAX_INPUTS, MAX_INPUT_TEXT_UNITS};
 
 pub const MAX_INT: i64 = 9_007_199_254_740_991;
 pub const MAX_SOURCE_UNITS: usize = 262_144;

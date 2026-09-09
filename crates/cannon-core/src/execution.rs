@@ -1,3 +1,4 @@
+use crate::inputs::{resolve, InputBindings};
 use crate::syntax::{NodeKind, Op};
 use crate::{CompiledExpression, Diagnostic, Span, Value, MAX_DEPTH, MAX_INT};
 use std::ops::ControlFlow;
@@ -47,6 +48,7 @@ pub struct ObservedOutcome {
 
 struct Executor<'a, F> {
     program: &'a CompiledExpression,
+    values: Vec<&'a Value>,
     limits: Limits,
     options: ObservationOptions,
     cancellation: &'a CancellationToken,
@@ -101,6 +103,7 @@ impl<F: FnMut(&TraceStep) -> ControlFlow<()>> Executor<'_, F> {
         if depth > self.limits.max_depth { return Err(Diagnostic::new("DEPTH_LIMIT", "Execution depth budget exceeded.", span)); }
         let kind = node.kind.clone();
         let (value, trace_kind, label) = match kind {
+            NodeKind::Input(index) => ((*self.values[index]).clone(), "input", "input"),
             NodeKind::Literal(value) => (value, "literal", "literal"),
             NodeKind::Unary(op, child) => {
                 let v = self.eval(child, depth + 1)?;
@@ -156,14 +159,32 @@ pub fn evaluate_observed<F: FnMut(&TraceStep) -> ControlFlow<()>>(
     cancellation: &CancellationToken,
     observer: F,
 ) -> ObservedOutcome {
+    evaluate_bound_observed(program, &InputBindings::new(), limits, options, cancellation, observer)
+}
+
+pub fn evaluate_bound_observed<F: FnMut(&TraceStep) -> ControlFlow<()>>(
+    program: &CompiledExpression,
+    bindings: &InputBindings,
+    limits: Limits,
+    options: ObservationOptions,
+    cancellation: &CancellationToken,
+    observer: F,
+) -> ObservedOutcome {
     if limits.max_steps == 0 || limits.max_steps > 1_000_000 || limits.max_depth == 0 || limits.max_depth > MAX_DEPTH || limits.max_trace == 0 || limits.max_trace > 1_000_000 {
         return ObservedOutcome {
             outcome: Outcome { result: Err(Diagnostic::new("INVALID_LIMIT", "Limits must be positive; depth <= 128, steps/trace <= 1000000.", program.span())), trace: Vec::new(), steps: 0 },
             options, emitted_events: 0, observed_text_units: 0,
         };
     }
+    let values = match resolve(program, bindings) {
+        Ok(values) => values,
+        Err(error) => return ObservedOutcome {
+            outcome: Outcome { result: Err(error), trace: Vec::new(), steps: 0 },
+            options, emitted_events: 0, observed_text_units: 0,
+        },
+    };
     let mut executor = Executor {
-        program, limits, options, cancellation, observer,
+        program, values, limits, options, cancellation, observer,
         trace: Vec::new(), steps: 0, emitted_events: 0, observed_text_units: 0,
     };
     let result = executor.eval(program.root, 1);
@@ -175,4 +196,9 @@ pub fn evaluate_observed<F: FnMut(&TraceStep) -> ControlFlow<()>>(
 
 pub fn evaluate(program: &CompiledExpression, limits: Limits) -> Outcome {
     evaluate_observed(program, limits, ObservationOptions::default(), &CancellationToken::new(), |_| ControlFlow::Continue(())).outcome
+}
+
+/// Bind values by stable ID; all declarations are validated before evaluation.
+pub fn evaluate_bound(program: &CompiledExpression, bindings: &InputBindings, limits: Limits) -> Outcome {
+    evaluate_bound_observed(program, bindings, limits, ObservationOptions::default(), &CancellationToken::new(), |_| ControlFlow::Continue(())).outcome
 }

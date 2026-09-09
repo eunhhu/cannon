@@ -32,9 +32,13 @@ jobs:
       - run: npm test
       - name: Cross-engine values, failures, traces and source positions
         run: node scripts/check-native-conformance.mjs
+      - name: Typed inputs and native historical review conformance
+        run: node scripts/check-bound-conformance.mjs
       - name: Native demo
         run: cargo run --locked --offline --bin cannon-native -- demo
       - name: Streaming observation and cancellation demo
         run: cargo run --locked --offline -p cannon-core --example observe
+      - name: Typed policy and preserved-expectation demo
+        run: cargo run --locked --offline --bin cannon-policy -- demo
       - name: Existing full-engine demo
         run: node dist/src/cli.js demo

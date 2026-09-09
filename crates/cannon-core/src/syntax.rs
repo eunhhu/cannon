@@ -1,3 +1,4 @@
+use crate::inputs::{check_schema, InputReference, InputSpec};
 use crate::{Diagnostic, Span, Type, Value, MAX_DEPTH, MAX_INT, MAX_SOURCE_UNITS, MAX_TOKENS};
 
 #[derive(Clone, Debug)]
@@ -111,20 +112,44 @@ impl Op {
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) enum NodeKind { Literal(Value), Unary(Op, usize), Binary(Op, usize, usize), If(usize, usize, usize) }
+pub(crate) enum NodeKind { Input(usize), Literal(Value), Unary(Op, usize), Binary(Op, usize, usize), If(usize, usize, usize) }
 #[derive(Clone, Debug)]
 pub(crate) struct Node { pub kind: NodeKind, pub span: Span, pub ty: Type, depth: usize }
 
 /// Opaque, validated arena: callers cannot insert cycles, untyped nodes, or out-of-range integers.
 /// An arena also avoids recursively dropping a deeply nested rejected syntax tree.
 #[derive(Clone, Debug)]
-pub struct CompiledExpression { pub(crate) nodes: Vec<Node>, pub(crate) root: usize, source: String }
+pub struct CompiledExpression { pub(crate) nodes: Vec<Node>, pub(crate) root: usize, source: String, inputs: Vec<InputSpec> }
 impl CompiledExpression {
+    pub fn inputs(&self) -> &[InputSpec] { &self.inputs }
+    pub fn input_references(&self) -> Vec<InputReference> {
+        self.nodes.iter().filter_map(|node| {
+            if let NodeKind::Input(index) = &node.kind {
+                let input = &self.inputs[*index];
+                Some(InputReference { id: input.id.clone(), name: input.name.clone(), span: node.span })
+            } else { None }
+        }).collect()
+    }
+    /// Compare bound syntax, not all-input behavioral equivalence. Names and spans
+    /// are deliberately excluded; input identities and operand order are retained.
+    pub fn same_logic(&self, other: &Self) -> bool {
+        fn same(a: &CompiledExpression, ai: usize, b: &CompiledExpression, bi: usize) -> bool {
+            match (&a.nodes[ai].kind, &b.nodes[bi].kind) {
+                (NodeKind::Input(i), NodeKind::Input(j)) => a.inputs[*i].id == b.inputs[*j].id,
+                (NodeKind::Literal(x), NodeKind::Literal(y)) => x == y,
+                (NodeKind::Unary(o, x), NodeKind::Unary(p, y)) => o == p && same(a, *x, b, *y),
+                (NodeKind::Binary(o, l, r), NodeKind::Binary(p, x, y)) => o == p && same(a, *l, b, *x) && same(a, *r, b, *y),
+                (NodeKind::If(c, t, f), NodeKind::If(d, u, v)) => same(a, *c, b, *d) && same(a, *t, b, *u) && same(a, *f, b, *v),
+                _ => false,
+            }
+        }
+        same(self, self.root, other, other.root)
+    }
     pub fn source(&self) -> &str { &self.source }
     pub fn value_type(&self) -> Type { self.nodes[self.root].ty }
     pub fn span(&self) -> Span { self.nodes[self.root].span }
 }
-struct Parser { tokens: Vec<Token>, index: usize, nodes: Vec<Node>, nesting: usize }
+struct Parser { tokens: Vec<Token>, index: usize, nodes: Vec<Node>, nesting: usize, inputs: Vec<InputSpec> }
 impl Parser {
     fn peek(&self) -> &Token { &self.tokens[self.index] }
     fn take(&mut self) -> Token { let t = self.peek().clone(); if !matches!(t.kind, TokenKind::End) { self.index += 1; } t }
@@ -136,6 +161,7 @@ impl Parser {
     fn node(&mut self, kind: NodeKind, span: Span) -> Result<usize, Diagnostic> {
         let mismatch = |span| Diagnostic::new("TYPE_MISMATCH", "Expression operand types are incompatible.", span);
         let (ty, depth) = match &kind {
+            NodeKind::Input(index) => (self.inputs[*index].input_type.base_type(), 1),
             NodeKind::Literal(v) => (v.value_type(), 1),
             NodeKind::Unary(op, child) => {
                 let target = if *op == Op::Neg { Type::Int } else { Type::Bool };
@@ -187,7 +213,11 @@ impl Parser {
                 let no = self.expression(0)?;
                 self.node(NodeKind::If(cond, yes, no), Span { end: self.end(), ..start })?
             }
-            TokenKind::Word(_) => return Err(Diagnostic::new("UNKNOWN_NAME", "Bindings and calls are not implemented in the native expression slice.", start)),
+            TokenKind::Word(name) => {
+                let index = self.inputs.iter().position(|s| s.name == name)
+                    .ok_or_else(|| Diagnostic::new("UNKNOWN_NAME", format!("Unknown input {name}; calls are not supported here."), start))?;
+                self.node(NodeKind::Input(index), start)?
+            }
             _ => return Err(Diagnostic::new("PARSE_ERROR", "Expected an expression.", start)),
         };
         loop {
@@ -211,9 +241,28 @@ impl Parser {
 }
 
 pub fn compile_expression(source: &str) -> Result<CompiledExpression, Diagnostic> {
+    compile_with_inputs(source, &[])
+}
+
+pub fn compile_with_inputs(source: &str, inputs: &[InputSpec]) -> Result<CompiledExpression, Diagnostic> {
+    check_schema(inputs)?;
     let tokens = Lexer { source, byte: 0, offset: 0, line: 1, column: 1 }.tokens()?;
-    let mut parser = Parser { tokens, index: 0, nodes: Vec::new(), nesting: 0 };
+    let mut parser = Parser { tokens, index: 0, nodes: Vec::new(), nesting: 0, inputs: inputs.to_vec() };
     let root = parser.expression(0)?;
     if !matches!(parser.peek().kind, TokenKind::End) { return Err(Diagnostic::new("PARSE_ERROR", "Unexpected token after expression.", parser.peek().span)); }
-    Ok(CompiledExpression { nodes: parser.nodes, root, source: source.to_owned() })
+    Ok(CompiledExpression { nodes: parser.nodes, root, source: source.to_owned(), inputs: parser.inputs })
+}
+
+/// CLI data accepts scalar literals, not general expressions or host code.
+/// Parentheses around a literal are harmless and accepted by the expression parser.
+pub fn parse_input_literal(source: &str) -> Result<Value, Diagnostic> {
+    let program = compile_expression(source)?;
+    match &program.nodes[program.root].kind {
+        NodeKind::Literal(value) => Ok(value.clone()),
+        NodeKind::Unary(Op::Neg, child) => match &program.nodes[*child].kind {
+            NodeKind::Literal(Value::Int(n)) => Ok(Value::Int(-n)),
+            _ => Err(Diagnostic::new("INPUT_LITERAL", "Expected a scalar literal, not a calculation.", program.span())),
+        },
+        _ => Err(Diagnostic::new("INPUT_LITERAL", "Expected a scalar literal, not a calculation.", program.span())),
+    }
 }
